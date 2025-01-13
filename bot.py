@@ -4,7 +4,9 @@ from collection_score import get_collection_score
 from wallet_profile import get_wallet_profile
 from price_prediction import get_price_prediction
 from analytics import fetch_analytics,plot_and_send_analytics
+from collection_holders import fetch_holder_data,plot_holder_trend
 from collection_metadata import search_nft
+import market_price_trend
 from config import TELEGRAM_TOKEN
 import aiohttp
 
@@ -55,6 +57,8 @@ async def nft_details_menu(update_or_message, context: CallbackContext):
         [InlineKeyboardButton("Show Predicted Price", callback_data="show_price")],
         [InlineKeyboardButton("Check Anomaly", callback_data="check_anomaly")],
         [InlineKeyboardButton("Show Analytics", callback_data="show_analytics")],
+        [InlineKeyboardButton("Show Holder Trend", callback_data="collection_holder")],
+        [InlineKeyboardButton("MarketCap & Price Ceiling Trend", callback_data="mpc")],
         [InlineKeyboardButton("Go Back", callback_data="go_back")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -62,6 +66,26 @@ async def nft_details_menu(update_or_message, context: CallbackContext):
     # Ensure callback_query exists and use it to edit the message
     
     await context.bot.send_message(chat_id=chat_id, text='What would you like to do next?', reply_markup=reply_markup)
+
+async def show_trend_options(update_or_message, context: CallbackContext):
+    if hasattr(update_or_message, 'effective_message'):
+        message = update_or_message.effective_message
+    elif hasattr(update_or_message, 'message'):
+        message = update_or_message.message  # This is for callback queries
+    else:
+        message = update_or_message  # Assuming this is a direct Message object
+
+    chat_id = message.chat_id
+    keyboard = [
+        [InlineKeyboardButton("Last 24 Hours", callback_data="trend_24h")],
+        [InlineKeyboardButton("Last 7 Days", callback_data="trend_7d")],
+        [InlineKeyboardButton("Last 30 Days", callback_data="trend_30d")],
+        [InlineKeyboardButton("All Time", callback_data="trend_all")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await context.bot.send_message(chat_id=chat_id, text='Select the time range for MarketCap & Price Ceiling Trends:', reply_markup=reply_markup)
+
+
 
 async def show_analytics_menu(update_or_message, context: CallbackContext):
     if hasattr(update_or_message, 'effective_message'):
@@ -213,7 +237,24 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
         # Use the correct attribute to reply to the user
         await context.bot.send_message(chat_id=chat_id, text=message)
         await nft_details_menu(update.callback_query.message, context)
-       
+
+    elif data == "collection_holder":
+        chat_id = query.message.chat_id
+        contract_address = context.chat_data.get('nft_contract_address')
+        if contract_address:
+            holder_data = await fetch_holder_data(contract_address)
+            if holder_data and 'data' in holder_data and holder_data['data']:
+                # Assuming that the fetched data is correctly formatted and not empty
+                await plot_holder_trend(holder_data['data'][0], query.message)
+            else:
+                message = "Failed to retrieve holder data or no data available."
+                await context.bot.send_message(chat_id=chat_id, text=message)
+        else:
+            message = "No contract address found. Please search for NFTs first."
+            await context.bot.send_message(chat_id=chat_id, text=message)
+
+        # Regardless of the outcome, offer the user to return to the previous menu or start a new action
+        await nft_details_menu(update.callback_query.message, context)
 
     elif data == "check_anomaly":
         chat_id = query.message.chat_id
@@ -246,6 +287,28 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
         context.chat_data['action'] = 'awaiting_token_id'
     elif data == "show_analytics":
         await show_analytics_menu(update, context)
+
+    elif data=="mpc":
+        await show_trend_options(update, context)
+
+    elif data.startswith("trend_"):
+        chat_id = query.message.chat_id
+        time_range = data.split("_")[1]
+        contract_address = context.chat_data.get('nft_contract_address')
+        if contract_address:
+            trend_data = await market_price_trend.fetch_market_price_trends(contract_address, time_range)
+            if trend_data and 'data' in trend_data and trend_data['data']:
+                await market_price_trend.plot_trends(trend_data, query.message)
+                message = "The trends have been displayed above."
+            else:
+                message = "Failed to retrieve trend data or no data available."
+        else:
+            message = "No contract address found. Please search for NFTs first."
+
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        await nft_details_menu(query.message, context)
+
+
     elif data.startswith("analytics_"):
         # Handle the selected time range (e.g., 24h, 7d, all)
         time_range = data.split("_")[1]
