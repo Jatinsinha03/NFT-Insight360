@@ -7,12 +7,22 @@ from analytics import fetch_analytics,plot_and_send_analytics
 from collection_holders import fetch_holder_data,plot_holder_trend
 from collection_metadata import search_nft
 import market_price_trend
+from flask import Flask, jsonify
+from threading import Thread
 from config import TELEGRAM_TOKEN
 import aiohttp
 
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text('Send me your wallet address.')
 
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return jsonify({"status": "running"})
+
+def run_app():
+    app.run(host='0.0.0.0', port=5000)
 
 async def display_options(update_or_message, context: CallbackContext, clear_nft=False):
     if hasattr(update_or_message, 'effective_message'):
@@ -341,7 +351,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     else:
         await display_options(update, context)
 
-def main() -> None:
+def run_bot():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_query))
@@ -349,4 +359,5 @@ def main() -> None:
     app.run_polling()
 
 if __name__ == '__main__':
-    main()
+    Thread(target=run_app).start()
+    run_bot()
