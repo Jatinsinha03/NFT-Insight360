@@ -3,12 +3,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from collection_score import get_collection_score
 from wallet_profile import get_wallet_profile
 from price_prediction import get_price_prediction
+from analytics import fetch_analytics,plot_and_send_analytics
 from collection_metadata import search_nft
 from config import TELEGRAM_TOKEN
 import aiohttp
 
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text('Send me your wallet address.')
+
 
 async def display_options(update_or_message, context: CallbackContext, clear_nft=False):
     if hasattr(update_or_message, 'effective_message'):
@@ -29,7 +31,8 @@ async def display_options(update_or_message, context: CallbackContext, clear_nft
 
     keyboard = [
         [InlineKeyboardButton("Show Wallet Profile", callback_data="profile")],
-        [InlineKeyboardButton("Search for NFTs", callback_data="ask_for_contract")]
+        [InlineKeyboardButton("Search for NFTs", callback_data="ask_for_contract")],
+        [InlineKeyboardButton("Exit", callback_data="exit")] 
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await context.bot.send_message(chat_id=chat_id, text='Choose an option:', reply_markup=reply_markup)
@@ -51,6 +54,7 @@ async def nft_details_menu(update_or_message, context: CallbackContext):
         [InlineKeyboardButton("Show Collection Score", callback_data="show_score")],
         [InlineKeyboardButton("Show Predicted Price", callback_data="show_price")],
         [InlineKeyboardButton("Check Anomaly", callback_data="check_anomaly")],
+        [InlineKeyboardButton("Show Analytics", callback_data="show_analytics")],
         [InlineKeyboardButton("Go Back", callback_data="go_back")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -58,6 +62,24 @@ async def nft_details_menu(update_or_message, context: CallbackContext):
     # Ensure callback_query exists and use it to edit the message
     
     await context.bot.send_message(chat_id=chat_id, text='What would you like to do next?', reply_markup=reply_markup)
+
+async def show_analytics_menu(update_or_message, context: CallbackContext):
+    if hasattr(update_or_message, 'effective_message'):
+        message = update_or_message.effective_message
+    elif hasattr(update_or_message, 'message'):
+        message = update_or_message.message  # This is for callback queries
+    else:
+        message = update_or_message  # Assuming this is a direct Message object
+
+    chat_id = message.chat_id
+    keyboard = [
+        [InlineKeyboardButton("Last 24 Hours", callback_data="analytics_24h")],
+        [InlineKeyboardButton("Last 7 Days", callback_data="analytics_7d")],
+        [InlineKeyboardButton("All Time", callback_data="analytics_all")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await context.bot.send_message(chat_id=chat_id, text='Select the time range for analytics:', reply_markup=reply_markup)
+
 
 async def fetch_anomaly_prediction(features):
     url = "https://nft-nexus-g7co.onrender.com/anomaly-predict"
@@ -71,13 +93,32 @@ async def fetch_anomaly_prediction(features):
         except Exception as e:
             return {'prediction': f'An error occurred: {str(e)}'}
 
+async def fetch_and_display_analytics(update: Update, context: CallbackContext, time_range: str):
+    contract_address = context.chat_data.get('nft_contract_address')
+    if not contract_address:
+        await update.callback_query.message.reply_text("No contract address found. Please set this first.")
+        return
+
+    analytics_data = await fetch_analytics(contract_address, time_range)
+    
+    if analytics_data:
+        await plot_and_send_analytics(analytics_data, update.callback_query.message)
+        await nft_details_menu(update.callback_query.message, context)
+    else:
+        await update.callback_query.message.reply_text("Failed to retrieve analytics data.")
+
 
 async def handle_query(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
     data = query.data
+    chat_id = query.message.chat_id
 
-    if data == "profile":
+    if data == "exit":
+        await context.bot.send_message(chat_id=chat_id, text="Thank you for using our service. Feel free to return anytime!")
+        context.chat_data.clear()
+
+    elif data == "profile":
         wallet_address = context.chat_data.get('wallet_address')
         print(wallet_address)
         if wallet_address:
@@ -104,7 +145,8 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
         else:
             # Prompt user to send a wallet address if not found in context data
             message = "Please send your wallet address first."
-        await query.message.reply_text(message)
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        await display_options(update.callback_query.message, context)
     elif data == "ask_for_contract":
         await query.message.reply_text("Please send the contract address for the NFT collection.")
         context.chat_data['action'] = 'awaiting_contract'
@@ -202,6 +244,12 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
     elif data == "show_price":
         await query.message.reply_text("Please send the token ID for price prediction.")
         context.chat_data['action'] = 'awaiting_token_id'
+    elif data == "show_analytics":
+        await show_analytics_menu(update, context)
+    elif data.startswith("analytics_"):
+        # Handle the selected time range (e.g., 24h, 7d, all)
+        time_range = data.split("_")[1]
+        await fetch_and_display_analytics(update, context, time_range)
     elif data == "go_back":
         await display_options(query.message, context)
 

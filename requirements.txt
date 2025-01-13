@@ -1,3 +1,7 @@
 python-telegram-bot
 requests
 aiohttp
+matplotlib
+ast
+io
+datetime
