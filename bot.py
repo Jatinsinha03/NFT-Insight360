@@ -10,12 +10,21 @@ import aiohttp
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text('Send me your wallet address.')
 
-async def display_options(update: Update, context: CallbackContext, clear_nft=False):
+async def display_options(update_or_message, context: CallbackContext, clear_nft=False):
+    if hasattr(update_or_message, 'effective_message'):
+        message = update_or_message.effective_message
+    elif hasattr(update_or_message, 'message'):
+        message = update_or_message.message  # This is for callback queries
+    else:
+        message = update_or_message  # Assuming this is a direct Message object
+
+    chat_id = message.chat_id
+    
     if clear_nft:
         context.chat_data.pop('nft_contract_address', None)
 
     if 'wallet_address' not in context.chat_data:
-        wallet_address = update.message.text
+        wallet_address = message.text
         context.chat_data['wallet_address'] = wallet_address
 
     keyboard = [
@@ -23,9 +32,20 @@ async def display_options(update: Update, context: CallbackContext, clear_nft=Fa
         [InlineKeyboardButton("Search for NFTs", callback_data="ask_for_contract")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text('Choose an option:', reply_markup=reply_markup)
+    await context.bot.send_message(chat_id=chat_id, text='Choose an option:', reply_markup=reply_markup)
 
-async def nft_details_menu(update: Update, context: CallbackContext):
+    
+
+async def nft_details_menu(update_or_message, context: CallbackContext):
+    # Determine if update_or_message is an Update or Message object
+    if hasattr(update_or_message, 'effective_message'):
+        message = update_or_message.effective_message
+    elif hasattr(update_or_message, 'message'):
+        message = update_or_message.message  # This is for callback queries
+    else:
+        message = update_or_message  # Assuming this is a direct Message object
+
+    chat_id = message.chat_id
     keyboard = [
         [InlineKeyboardButton("Show Collection Metadata", callback_data="show_metadata")],
         [InlineKeyboardButton("Show Collection Score", callback_data="show_score")],
@@ -36,10 +56,8 @@ async def nft_details_menu(update: Update, context: CallbackContext):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     # Ensure callback_query exists and use it to edit the message
-    if update.callback_query:
-        await update.callback_query.message.edit_text('What would you like to do next?', reply_markup=reply_markup)
-    else:
-        await update.message.reply_text('What would you like to do next?', reply_markup=reply_markup)
+    
+    await context.bot.send_message(chat_id=chat_id, text='What would you like to do next?', reply_markup=reply_markup)
 
 async def fetch_anomaly_prediction(features):
     url = "https://nft-nexus-g7co.onrender.com/anomaly-predict"
@@ -91,6 +109,7 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
         await query.message.reply_text("Please send the contract address for the NFT collection.")
         context.chat_data['action'] = 'awaiting_contract'
     elif data == "show_metadata":
+        chat_id = query.message.chat_id
         contract_address = context.chat_data.get('nft_contract_address')
         if contract_address:
             nft_info = search_nft(contract_address)
@@ -122,9 +141,10 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
                 message = "Failed to retrieve NFT data or no data available."
         else:
             message = "No contract address found. Please search for NFTs first."
-        await query.message.reply_text(message, disable_web_page_preview=False)
-        await nft_details_menu(query.message, context)
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        await nft_details_menu(update.callback_query.message, context)
     elif data == "show_score":
+        chat_id = query.message.chat_id
         contract_address = context.chat_data.get('nft_contract_address')
         if contract_address:
             # Fetch collection score data
@@ -149,13 +169,12 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
             message = "No contract address found. Please search for NFTs first."
 
         # Use the correct attribute to reply to the user
-        if update.callback_query:
-            await update.callback_query.message.reply_text(message)
-            await nft_details_menu(update.callback_query.message, context)
-        else:
-            await update.message.reply_text(message)  # Only needed if you call this function outside of a callback query context
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        await nft_details_menu(update.callback_query.message, context)
+       
 
     elif data == "check_anomaly":
+        chat_id = query.message.chat_id
         contract_address = context.chat_data.get('nft_contract_address')
         if contract_address:
             score_data = get_collection_score(contract_address)
@@ -177,8 +196,8 @@ async def handle_query(update: Update, context: CallbackContext) -> None:
         else:
             message = "No contract address found. Please search for NFTs first."
     
-        await query.message.reply_text(message)
-        await nft_details_menu(update, context)
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        await nft_details_menu(update.callback_query.message, context)
         
     elif data == "show_price":
         await query.message.reply_text("Please send the token ID for price prediction.")
